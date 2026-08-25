@@ -20,6 +20,7 @@ declare module 'virtual:open-slide/config' {
       showSlideUi: boolean;
       allowHtmlDownload: boolean;
     };
+    googleClientId?: string;
   };
   export default config;
 }

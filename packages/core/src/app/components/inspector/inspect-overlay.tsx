@@ -4,9 +4,11 @@ import { PANEL_TRANSITION_MS } from '@/components/panel/panel-shell';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { findSlideSource, type SlideSourceHit } from '@/lib/inspector/fiber';
 import { hasOnlyInlineTextChildren, INLINE_TEXT_TAGS } from '@/lib/inspector/inline-text';
+import type { EditOp } from '@/lib/inspector/use-editor';
 import { useLocale } from '@/lib/use-locale';
 import { cn } from '@/lib/utils';
-import { useInspector } from './inspector-provider';
+import { type SelectedTarget, useInspector } from './inspector-provider';
+import { LayoutTransformLayer } from './layout-transform-layer';
 
 type Highlight = { hit: SlideSourceHit };
 
@@ -17,7 +19,7 @@ const FRAME_MORPH_MS = 180;
 const LAYOUT_TRACK_MS = PANEL_TRANSITION_MS + FRAME_MORPH_MS;
 
 export function InspectOverlay() {
-  const { active, slideId, selected, setSelected, cancel, openCrop } = useInspector();
+  const { active, slideId, selected, setSelected, cancel, openCrop, bufferOps } = useInspector();
   const overlayRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<Highlight | null>(null);
 
@@ -88,7 +90,15 @@ export function InspectOverlay() {
   if (!active) return null;
   return (
     <div ref={overlayRef} data-inspector-ui className="pointer-events-none absolute inset-0 z-30">
-      <Frame anchor={selectedAnchor} overlayRef={overlayRef} variant="selected" showImageActions />
+      <Frame
+        anchor={selectedAnchor}
+        overlayRef={overlayRef}
+        variant="selected"
+        showImageActions
+        selected={selected}
+        bufferOps={bufferOps}
+        setSelected={setSelected}
+      />
       <Frame anchor={dedupedHover} overlayRef={overlayRef} variant="hover" />
     </div>
   );
@@ -106,11 +116,17 @@ function Frame({
   overlayRef,
   variant,
   showImageActions = false,
+  selected,
+  bufferOps,
+  setSelected,
 }: {
   anchor: HTMLElement | null;
   overlayRef: React.RefObject<HTMLDivElement>;
   variant: FrameVariant;
   showImageActions?: boolean;
+  selected?: SelectedTarget | null;
+  bufferOps?: (line: number, column: number, anchor: HTMLElement, ops: EditOp[]) => void;
+  setSelected?: (t: SelectedTarget | null) => void;
 }) {
   const [rect, setRect] = useState<RelRect | null>(null);
   const [hasTarget, setHasTarget] = useState(false);
@@ -221,6 +237,16 @@ function Frame({
           rect={rect}
           visible={actionsVisible}
           transition={transition}
+        />
+      )}
+      {variant === 'selected' && anchor && rect && selected && bufferOps && setSelected && (
+        <LayoutTransformLayer
+          anchor={anchor}
+          overlayRef={overlayRef}
+          rect={rect}
+          selected={selected}
+          bufferOps={bufferOps}
+          setSelected={setSelected}
         />
       )}
     </>

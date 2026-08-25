@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import type { ViteDevServer } from 'vite';
 import {
+  createSlideFromSource,
   duplicateNotesElementInSource,
   duplicatePageInDefaultExportInSource,
   duplicateSlideDir,
@@ -13,6 +14,7 @@ import {
   SLIDE_ID_RE,
   updateMetaTitleInSource,
   validateSlideName,
+  writeSlideSource,
 } from '../../editing/slide-ops.ts';
 import { readManifest, writeManifest } from '../../files/folders.ts';
 import { validateMutationRequest } from '../../http/request-guard.ts';
@@ -23,7 +25,8 @@ import { type ApiContext, json, readBody } from './context.ts';
 // POST   /__slides/:id/pages/:i/duplicate duplicate page
 // POST   /__slides/:id/duplicate          duplicate slide directory { newId? }
 // PATCH  /__slides/:id                    rename slide (writes meta.title)
-// DELETE /__slides/:id                    delete slide directory + folder assignment
+// PUT    /__slides/:id/google-import       replace index.tsx from Google import { source }
+// POST   /__slides/import-google           create slide from import { newId, source }
 
 type DuplicateSlideBody = { newId?: unknown };
 type SlidePatchBody = { name?: unknown };
@@ -156,6 +159,43 @@ export function registerSlideRoutes(server: ViteDevServer, ctx: ApiContext): voi
           await writeManifest(ctx.manifestPath, manifest);
         }
         return json(res, 200, { ok: true, slideId: duplicated.slideId });
+      }
+
+      const googleImportMatch = url.pathname.match(/^\/([^/]+)\/google-import$/);
+      if (googleImportMatch && method === 'PUT') {
+        const requestCheck = validateMutationRequest(req, { requireJsonBody: true });
+        if (!requestCheck.ok) {
+          return json(res, requestCheck.status, { error: requestCheck.error });
+        }
+        const slideId = googleImportMatch[1];
+        if (!SLIDE_ID_RE.test(slideId)) return json(res, 400, { error: 'invalid slideId' });
+
+        const body = (await readBody(req)) as { source?: unknown };
+        if (typeof body.source !== 'string' || body.source.trim().length === 0) {
+          return json(res, 400, { error: 'invalid source' });
+        }
+
+        const written = await writeSlideSource(ctx.slidesRoot, slideId, body.source);
+        if (!written.ok) return json(res, written.status, { error: written.error });
+        return json(res, 200, { ok: true, slideId });
+      }
+
+      if (url.pathname === '/import-google' && method === 'POST') {
+        const requestCheck = validateMutationRequest(req, { requireJsonBody: true });
+        if (!requestCheck.ok) {
+          return json(res, requestCheck.status, { error: requestCheck.error });
+        }
+        const body = (await readBody(req)) as { newId?: unknown; source?: unknown };
+        if (typeof body.newId !== 'string' || !SLIDE_ID_RE.test(body.newId)) {
+          return json(res, 400, { error: 'invalid newId' });
+        }
+        if (typeof body.source !== 'string' || body.source.trim().length === 0) {
+          return json(res, 400, { error: 'invalid source' });
+        }
+
+        const created = await createSlideFromSource(ctx.slidesRoot, body.newId, body.source);
+        if (!created.ok) return json(res, created.status, { error: created.error });
+        return json(res, 200, { ok: true, slideId: created.slideId });
       }
 
       const idMatch = url.pathname.match(/^\/([^/]+)$/);

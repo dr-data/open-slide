@@ -14,6 +14,7 @@ import {
   MoreHorizontal,
   Play,
   Presentation,
+  RefreshCw,
   Terminal,
 } from 'lucide-react';
 import {
@@ -28,6 +29,7 @@ import {
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { AssetView } from '@/components/asset-view';
+import { GoogleSlidesDialog } from '@/components/google-slides/google-slides-dialog';
 import { HistoryProvider } from '@/components/history-provider';
 import { CommentWidget } from '@/components/inspector/comment-widget';
 import { InspectOverlay } from '@/components/inspector/inspect-overlay';
@@ -68,9 +70,11 @@ import { SlideCanvas } from '../components/slide-canvas';
 import { isDeckWarmed, markDeckWarmed, SlidePreloadLayer } from '../components/slide-preload-layer';
 import { SlideTransitionLayer } from '../components/slide-transition-layer';
 import { type ThumbnailActions, ThumbnailRail } from '../components/thumbnail-rail';
+import { exportSlideToGoogleSlides } from '../lib/export-google-slides';
 import { exportSlideAsHtml } from '../lib/export-html';
 import { exportSlideAsPdf, isSafari, type PdfExportProgress } from '../lib/export-pdf';
 import { exportSlideAsImagePptx, type PptxExportProgress } from '../lib/export-pptx';
+import { connectGoogle, isGoogleConnected } from '../lib/google-auth';
 import { remapNotesSessionCacheAfterReorder } from '../lib/inspector/use-notes';
 import type { SlideModule } from '../lib/sdk';
 import { usePrefersReducedMotion } from '../lib/use-prefers-reduced-motion';
@@ -97,6 +101,8 @@ export function Slide() {
     index: number;
   } | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [googleImportOpen, setGoogleImportOpen] = useState(false);
+  const [googleSyncOpen, setGoogleSyncOpen] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const linkCopiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [designOpen, setDesignOpen] = useState(false);
@@ -478,6 +484,34 @@ export function Slide() {
     }
   };
 
+  const exportGoogleSlides = async () => {
+    if (!slide || exporting) return;
+    if (!config.googleClientId) {
+      toast.error(t.slide.googleClientIdMissing);
+      return;
+    }
+    setExporting(true);
+    try {
+      if (!isGoogleConnected()) await connectGoogle(config.googleClientId);
+      const toastId = toast.loading(t.slide.exportToGoogleSlides);
+      const result = await exportSlideToGoogleSlides(slide, slideId, (progress) => {
+        toast.loading(`${t.slide.exportToGoogleSlides} (${progress.percent}%)`, { id: toastId });
+      });
+      toast.success(t.slide.exportToGoogleSlides, {
+        id: toastId,
+        action: {
+          label: 'Open',
+          onClick: () => window.open(result.url, '_blank', 'noopener,noreferrer'),
+        },
+      });
+    } catch (err) {
+      console.error('[open-slide] google slides export failed', err);
+      toast.error(t.slide.googleSlidesExportFailed);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const exportHtml = async () => {
     if (!slide || exporting) return;
     setExporting(true);
@@ -557,6 +591,20 @@ export function Slide() {
         <FileImage />
         {t.slide.exportAsImagePptx}
       </DropdownMenuItem>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem disabled={exporting} onClick={exportGoogleSlides}>
+        <Presentation />
+        {t.slide.exportToGoogleSlides}
+      </DropdownMenuItem>
+      <DropdownMenuItem disabled={exporting} onClick={() => setGoogleImportOpen(true)}>
+        <FileCode2 />
+        {t.slide.importFromGoogleSlides}
+      </DropdownMenuItem>
+      <DropdownMenuItem disabled={exporting} onClick={() => setGoogleSyncOpen(true)}>
+        <RefreshCw />
+        {t.slide.syncFromGoogleSlides}
+      </DropdownMenuItem>
+      <DropdownMenuSeparator />
       <TooltipProvider delay={200}>
         <Tooltip>
           <TooltipTrigger
@@ -885,6 +933,23 @@ export function Slide() {
               }}
             />
           )}
+          <GoogleSlidesDialog
+            mode="import"
+            slideId={slideId}
+            open={googleImportOpen}
+            onClose={() => setGoogleImportOpen(false)}
+            onImported={(newId) => {
+              if (newId && newId !== slideId) navigate(`/slides/${newId}`);
+              else window.location.reload();
+            }}
+          />
+          <GoogleSlidesDialog
+            mode="sync"
+            slideId={slideId}
+            open={googleSyncOpen}
+            onClose={() => setGoogleSyncOpen(false)}
+            onImported={() => window.location.reload()}
+          />
         </div>
       </InspectorProvider>
     </HistoryProvider>
