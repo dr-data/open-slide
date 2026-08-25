@@ -1,10 +1,11 @@
 import { createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { readSyncMeta, writeSyncMeta } from '../../google-slides/auth-store';
 import { collectPageExportElements } from '../../google-slides/dom-walk';
-import { syncOpenSlideToGoogle } from '../../google-slides/sync';
 import type { DomExportElement } from '../../google-slides/types';
 import { designToCssVars } from './design';
 import { nextPaint, sleep } from './dom';
+import { exportToGoogleViaGws } from './google-slides-api';
 import { SlidePageProvider } from './page-context';
 import { isFrameAnimationSettled, waitForDataWaitfor, waitForFonts } from './print-ready';
 import { CANVAS_HEIGHT, CANVAS_WIDTH, type SlideModule } from './sdk';
@@ -42,11 +43,25 @@ export async function exportSlideToGoogleSlides(
   onProgress?.({ phase: 'uploading', current: total, total, percent: 90 });
 
   const title = slide.meta?.title ?? slideId;
-  const linked = (await import('../../google-slides/sync')).getLinkedGooglePresentation(slideId);
-  const meta = await syncOpenSlideToGoogle(slideId, title, exportPages, linked?.presentationId);
+  const linked = readSyncMeta(slideId);
+  const result = await exportToGoogleViaGws({
+    title,
+    pages: exportPages,
+    presentationId: linked?.presentationId,
+  });
+
+  writeSyncMeta(slideId, {
+    presentationId: result.presentationId,
+    presentationUrl: result.url,
+    title: result.title,
+    modifiedTime: result.modifiedTime ?? new Date().toISOString(),
+    slideId,
+    lastSyncAt: new Date().toISOString(),
+    lastDirection: linked?.presentationId ? 'sync' : 'export',
+  });
 
   onProgress?.({ phase: 'done', current: total, total, percent: 100 });
-  return { url: meta.presentationUrl, presentationId: meta.presentationId };
+  return { url: result.url, presentationId: result.presentationId };
 }
 
 async function capturePagesForExport(

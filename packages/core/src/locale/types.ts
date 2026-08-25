@@ -138,6 +138,10 @@ export type Locale = {
     googleOpenPresentation: string;
     googleDisconnect: string;
     googleClientIdMissing: string;
+    gwsAuthHint: string;
+    gwsAuthConnectedPrefix: string;
+    gwsAuthConnectedFallback: string;
+    googleSyncNotLinked: string;
     importFromGoogleSlides: string;
     syncFromGoogleSlides: string;
     present: string;

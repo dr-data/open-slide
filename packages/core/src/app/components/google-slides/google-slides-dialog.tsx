@@ -1,6 +1,4 @@
-import config from 'virtual:open-slide/config';
-import { ExternalLink, RefreshCw } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -13,13 +11,14 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { connectGoogle, disconnectGoogle, isGoogleConnected } from '@/lib/google-auth';
-import { useLocale } from '@/lib/use-locale';
+import { ensureGoogleConnected, getGoogleAuthStatus } from '@/lib/google-auth';
 import {
-  getLinkedGooglePresentation,
-  importGooglePresentationToSource,
-  syncFromGoogleIfChanged,
-} from '../../../google-slides/sync';
+  type GwsAuthStatus,
+  importFromGoogleViaGws,
+  syncCheckFromGoogleViaGws,
+} from '@/lib/google-slides-api';
+import { useLocale } from '@/lib/use-locale';
+import { readSyncMeta, writeSyncMeta } from '../../../google-slides/auth-store';
 
 type Mode = 'import' | 'sync';
 
@@ -40,24 +39,21 @@ export function GoogleSlidesDialog({
   const [presentationUrl, setPresentationUrl] = useState('');
   const [newSlideId, setNewSlideId] = useState(`google-${slideId}`);
   const [busy, setBusy] = useState(false);
-  const linked = getLinkedGooglePresentation(slideId);
-  const clientId = config.googleClientId;
+  const [auth, setAuth] = useState<GwsAuthStatus | null>(null);
+  const linked = readSyncMeta(slideId);
 
-  const ensureAuth = async () => {
-    if (isGoogleConnected()) return;
-    if (!clientId) {
-      throw new Error(t.slide.googleClientIdMissing);
-    }
-    await connectGoogle(clientId);
-  };
+  useEffect(() => {
+    if (!open) return;
+    void getGoogleAuthStatus().then(setAuth);
+  }, [open]);
 
   const runImport = async () => {
     setBusy(true);
     try {
-      await ensureAuth();
-      const { source, meta } = await importGooglePresentationToSource(presentationUrl, slideId);
+      await ensureGoogleConnected();
+      const { source, meta } = await importFromGoogleViaGws(presentationUrl);
 
-      if (mode === 'import' && slideId !== newSlideId.trim()) {
+      if (mode === 'import' && newSlideId.trim() !== slideId) {
         const res = await fetch('/__slides/import-google', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -68,6 +64,12 @@ export function GoogleSlidesDialog({
           throw new Error(err?.error ?? t.slide.googleImportFailed);
         }
         const data = (await res.json()) as { slideId: string };
+        writeSyncMeta(data.slideId, {
+          ...meta,
+          slideId: data.slideId,
+          lastSyncAt: new Date().toISOString(),
+          lastDirection: 'import',
+        });
         toast.success(t.slide.googleImportSuccess);
         onImported?.(data.slideId);
       } else {
@@ -80,6 +82,12 @@ export function GoogleSlidesDialog({
           const err = (await res.json().catch(() => null)) as { error?: string } | null;
           throw new Error(err?.error ?? t.slide.googleImportFailed);
         }
+        writeSyncMeta(slideId, {
+          ...meta,
+          slideId,
+          lastSyncAt: new Date().toISOString(),
+          lastDirection: 'import',
+        });
         toast.success(t.slide.googleImportSuccess);
         onImported?.();
       }
@@ -96,19 +104,38 @@ export function GoogleSlidesDialog({
   const runSync = async () => {
     setBusy(true);
     try {
-      await ensureAuth();
-      const result = await syncFromGoogleIfChanged(slideId);
+      await ensureGoogleConnected();
+      if (!linked?.presentationId) {
+        throw new Error(t.slide.googleSyncNotLinked);
+      }
+
+      const result = await syncCheckFromGoogleViaGws({
+        presentationId: linked.presentationId,
+        modifiedTime: linked.modifiedTime,
+      });
+
       if (!result.changed) {
         toast.message(t.slide.googleSyncUpToDate);
         onClose();
         return;
       }
+
       const res = await fetch(`/__slides/${encodeURIComponent(slideId)}/google-import`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ source: result.source }),
       });
-      if (!res.ok) throw new Error(t.slide.googleSyncFailed);
+      if (!res.ok) throw new Error(t.slide.googleImportFailed);
+
+      if (result.meta) {
+        writeSyncMeta(slideId, {
+          ...result.meta,
+          slideId,
+          lastSyncAt: new Date().toISOString(),
+          lastDirection: 'sync',
+        });
+      }
+
       toast.success(t.slide.googleSyncSuccess);
       onImported?.();
       onClose();
@@ -130,6 +157,12 @@ export function GoogleSlidesDialog({
             {mode === 'import' ? t.slide.googleImportDescription : t.slide.googleSyncDescription}
           </DialogDescription>
         </DialogHeader>
+
+        <div className="rounded-[6px] border border-border bg-muted/30 px-3 py-2 text-[11.5px] leading-relaxed text-muted-foreground">
+          {auth?.connected
+            ? `${t.slide.gwsAuthConnectedPrefix} ${auth.account ?? t.slide.gwsAuthConnectedFallback}`
+            : (auth?.error ?? t.slide.gwsAuthHint)}
+        </div>
 
         {mode === 'import' && (
           <div className="flex flex-col gap-3">
@@ -160,28 +193,14 @@ export function GoogleSlidesDialog({
               href={linked.presentationUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+              className="text-muted-foreground hover:text-foreground"
             >
-              <ExternalLink className="size-3" />
               {t.slide.googleOpenPresentation}
             </a>
           </div>
         )}
 
         <DialogFooter className="gap-2 sm:gap-0">
-          {isGoogleConnected() && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                disconnectGoogle();
-                toast.message(t.slide.googleDisconnect);
-              }}
-            >
-              {t.slide.googleDisconnect}
-            </Button>
-          )}
           <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
             {t.common.cancel}
           </Button>
@@ -191,14 +210,7 @@ export function GoogleSlidesDialog({
             disabled={busy || (mode === 'import' && !presentationUrl.trim())}
             onClick={mode === 'import' ? runImport : runSync}
           >
-            {mode === 'import' ? (
-              t.slide.googleImportAction
-            ) : (
-              <>
-                <RefreshCw className="size-3.5" />
-                {t.slide.googleSyncAction}
-              </>
-            )}
+            {mode === 'import' ? t.slide.googleImportAction : t.slide.googleSyncAction}
           </Button>
         </DialogFooter>
       </DialogContent>

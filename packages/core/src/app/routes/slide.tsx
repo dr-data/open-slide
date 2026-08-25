@@ -74,7 +74,7 @@ import { exportSlideToGoogleSlides } from '../lib/export-google-slides';
 import { exportSlideAsHtml } from '../lib/export-html';
 import { exportSlideAsPdf, isSafari, type PdfExportProgress } from '../lib/export-pdf';
 import { exportSlideAsImagePptx, type PptxExportProgress } from '../lib/export-pptx';
-import { connectGoogle, isGoogleConnected } from '../lib/google-auth';
+import { ensureGoogleConnected } from '../lib/google-auth';
 import { remapNotesSessionCacheAfterReorder } from '../lib/inspector/use-notes';
 import type { SlideModule } from '../lib/sdk';
 import { usePrefersReducedMotion } from '../lib/use-prefers-reduced-motion';
@@ -486,13 +486,9 @@ export function Slide() {
 
   const exportGoogleSlides = async () => {
     if (!slide || exporting) return;
-    if (!config.googleClientId) {
-      toast.error(t.slide.googleClientIdMissing);
-      return;
-    }
     setExporting(true);
     try {
-      if (!isGoogleConnected()) await connectGoogle(config.googleClientId);
+      await ensureGoogleConnected();
       const toastId = toast.loading(t.slide.exportToGoogleSlides);
       const result = await exportSlideToGoogleSlides(slide, slideId, (progress) => {
         toast.loading(`${t.slide.exportToGoogleSlides} (${progress.percent}%)`, { id: toastId });
