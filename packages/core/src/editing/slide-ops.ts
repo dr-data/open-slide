@@ -187,6 +187,45 @@ export function resolveSlideEntry(slidesRoot: string, slideId: string): string |
   return path.join(dir, 'index.tsx');
 }
 
+export async function writeSlideSource(
+  slidesRoot: string,
+  slideId: string,
+  source: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const entry = resolveSlideEntry(slidesRoot, slideId);
+  if (!entry) return { ok: false, status: 400, error: 'invalid slideId' };
+  try {
+    await fs.access(entry);
+  } catch {
+    return { ok: false, status: 404, error: 'slide not found' };
+  }
+  await fs.writeFile(entry, source, 'utf8');
+  return { ok: true };
+}
+
+export async function createSlideFromSource(
+  slidesRoot: string,
+  slideId: string,
+  source: string,
+): Promise<{ ok: true; slideId: string } | { ok: false; status: number; error: string }> {
+  if (!SLIDE_ID_RE.test(slideId)) return { ok: false, status: 400, error: 'invalid slideId' };
+
+  const root = path.resolve(slidesRoot);
+  const dir = path.resolve(root, slideId);
+  if (!dir.startsWith(root + path.sep)) {
+    return { ok: false, status: 400, error: 'invalid slideId' };
+  }
+
+  try {
+    await fs.access(dir);
+    return { ok: false, status: 409, error: 'slide already exists' };
+  } catch {}
+
+  await fs.mkdir(path.join(dir, 'assets'), { recursive: true });
+  await fs.writeFile(path.join(dir, 'index.tsx'), source, 'utf8');
+  return { ok: true, slideId };
+}
+
 function escapeSingleQuoted(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }

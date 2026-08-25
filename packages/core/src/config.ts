@@ -20,4 +20,6 @@ export type OpenSlideConfig = {
    */
   locale?: Locale;
   build?: OpenSlideBuildConfig;
+  /** Google OAuth client id for Slides export/import (Google Identity Services). */
+  googleClientId?: string;
 };

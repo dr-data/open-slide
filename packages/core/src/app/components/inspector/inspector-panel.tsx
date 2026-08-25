@@ -30,6 +30,12 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { findSlideSource } from '@/lib/inspector/fiber';
 import { hasOnlyInlineTextChildren } from '@/lib/inspector/inline-text';
+import {
+  type BoxSides,
+  type LayoutSnapshot,
+  layoutStyleOpsFromSnapshot,
+  readLayoutSnapshot,
+} from '@/lib/inspector/layout';
 import type { EditOp } from '@/lib/inspector/use-editor';
 import { useAgentSocketConnected } from '@/lib/use-agent-socket';
 import { useLocale } from '@/lib/use-locale';
@@ -50,6 +56,7 @@ type ElementSnapshot = {
   text: string | null;
   imageSrc: string | null;
   placeholder: { hint: string; width?: number; height?: number } | null;
+  layout: LayoutSnapshot;
 };
 
 type ContentSelection = { start: number; end: number };
@@ -303,6 +310,12 @@ export function InspectorPanel() {
           onClear={() => apply([{ kind: 'set-style', key: 'backgroundColor', value: null }])}
           clearable
         />
+      </Section>
+
+      <Separator />
+
+      <Section title={t.inspector.layoutSection}>
+        <LayoutFields snapshot={pinSnapshot} apply={apply} />
       </Section>
 
       {pinSnapshot.imageSrc !== null && (
@@ -954,6 +967,126 @@ function CommentsSection({
   );
 }
 
+function LayoutFields({
+  snapshot,
+  apply,
+}: {
+  snapshot: ElementSnapshot;
+  apply: (ops: EditOp[]) => void;
+}) {
+  const t = useLocale();
+  const layout = snapshot.layout;
+
+  const applyLayout = (next: LayoutSnapshot) => {
+    const styleOps = layoutStyleOpsFromSnapshot(next, layout);
+    if (styleOps.length === 0) return;
+    apply(styleOps.map((op) => ({ kind: 'set-style', key: op.key, value: op.value })));
+  };
+
+  const setPosition = (patch: Partial<Pick<LayoutSnapshot, 'x' | 'y' | 'width' | 'height'>>) => {
+    applyLayout({ ...layout, position: 'absolute', ...patch });
+  };
+
+  const setMargin = (patch: Partial<BoxSides>) => {
+    applyLayout({ ...layout, margin: { ...layout.margin, ...patch } });
+  };
+
+  const setPadding = (patch: Partial<BoxSides>) => {
+    applyLayout({ ...layout, padding: { ...layout.padding, ...patch } });
+  };
+
+  return (
+    <>
+      <Field label={t.inspector.positionXLabel}>
+        <NumberField
+          value={Math.round(layout.x)}
+          onChange={(n) => setPosition({ x: n })}
+          suffix="px"
+        />
+      </Field>
+      <Field label={t.inspector.positionYLabel}>
+        <NumberField
+          value={Math.round(layout.y)}
+          onChange={(n) => setPosition({ y: n })}
+          suffix="px"
+        />
+      </Field>
+      <Field label={t.inspector.widthLabel}>
+        <NumberField
+          value={Math.round(layout.width)}
+          onChange={(n) => setPosition({ width: n })}
+          min={8}
+          suffix="px"
+        />
+      </Field>
+      <Field label={t.inspector.heightLabel}>
+        <NumberField
+          value={Math.round(layout.height)}
+          onChange={(n) => setPosition({ height: n })}
+          min={8}
+          suffix="px"
+        />
+      </Field>
+      <Field label={t.inspector.marginTopLabel}>
+        <NumberField
+          value={Math.round(layout.margin.top)}
+          onChange={(n) => setMargin({ top: n })}
+          suffix="px"
+        />
+      </Field>
+      <Field label={t.inspector.marginRightLabel}>
+        <NumberField
+          value={Math.round(layout.margin.right)}
+          onChange={(n) => setMargin({ right: n })}
+          suffix="px"
+        />
+      </Field>
+      <Field label={t.inspector.marginBottomLabel}>
+        <NumberField
+          value={Math.round(layout.margin.bottom)}
+          onChange={(n) => setMargin({ bottom: n })}
+          suffix="px"
+        />
+      </Field>
+      <Field label={t.inspector.marginLeftLabel}>
+        <NumberField
+          value={Math.round(layout.margin.left)}
+          onChange={(n) => setMargin({ left: n })}
+          suffix="px"
+        />
+      </Field>
+      <Field label={t.inspector.paddingTopLabel}>
+        <NumberField
+          value={Math.round(layout.padding.top)}
+          onChange={(n) => setPadding({ top: n })}
+          suffix="px"
+        />
+      </Field>
+      <Field label={t.inspector.paddingRightLabel}>
+        <NumberField
+          value={Math.round(layout.padding.right)}
+          onChange={(n) => setPadding({ right: n })}
+          suffix="px"
+        />
+      </Field>
+      <Field label={t.inspector.paddingBottomLabel}>
+        <NumberField
+          value={Math.round(layout.padding.bottom)}
+          onChange={(n) => setPadding({ bottom: n })}
+          suffix="px"
+        />
+      </Field>
+      <Field label={t.inspector.paddingLeftLabel}>
+        <NumberField
+          value={Math.round(layout.padding.left)}
+          onChange={(n) => setPadding({ left: n })}
+          suffix="px"
+        />
+      </Field>
+    </>
+  );
+}
+
 function readSnapshot(el: HTMLElement): ElementSnapshot {
   const cs = getComputedStyle(el);
   const text = hasOnlyInlineTextChildren(el) ? readEditableText(el) : null;
@@ -983,6 +1116,7 @@ function readSnapshot(el: HTMLElement): ElementSnapshot {
     text,
     imageSrc,
     placeholder,
+    layout: readLayoutSnapshot(el),
   };
 }
 
