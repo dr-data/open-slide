@@ -59,11 +59,7 @@ async function refreshOAuthToken(
   return data.access_token;
 }
 
-async function tokenFromCredentialsFile(filePath: string): Promise<string | null> {
-  const raw = await readJsonFile(filePath);
-  if (!raw) return null;
-  const creds = raw as OAuthUserCreds;
-
+async function tokenFromCredentialsObject(creds: OAuthUserCreds): Promise<string | null> {
   const direct = creds.access_token ?? creds.token;
   if (typeof direct === 'string' && direct.length > 0) return direct;
 
@@ -71,6 +67,27 @@ async function tokenFromCredentialsFile(filePath: string): Promise<string | null
     return await refreshOAuthToken(creds.client_id, creds.client_secret, creds.refresh_token);
   }
   return null;
+}
+
+async function tokenFromCredentialsFile(filePath: string): Promise<string | null> {
+  const raw = await readJsonFile(filePath);
+  if (!raw) return null;
+  return await tokenFromCredentialsObject(raw as OAuthUserCreds);
+}
+
+async function tokenViaGwsCliExport(): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('gws', ['auth', 'export', '--unmasked'], {
+      timeout: 15_000,
+      env: process.env,
+    });
+    const trimmed = stdout.trim();
+    if (!trimmed) return null;
+    const parsed = JSON.parse(trimmed) as OAuthUserCreds;
+    return await tokenFromCredentialsObject(parsed);
+  } catch {
+    return null;
+  }
 }
 
 async function tokenFromCache(configDir: string): Promise<string | null> {
@@ -101,7 +118,8 @@ export async function resolveGwsAccessToken(): Promise<string | null> {
   const fromDefault = await tokenFromCredentialsFile(defaultCreds);
   if (fromDefault) return fromDefault;
 
-  return null;
+  // Encrypted keyring credentials are only readable through the gws binary itself.
+  return await tokenViaGwsCliExport();
 }
 
 async function readGwsAccount(): Promise<string | undefined> {
